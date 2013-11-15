@@ -217,12 +217,12 @@
 
         set.removeAll = function(arrayOfValues) {
             //If you passed nothing, we should remove everything
-            if (arrayOfValues === undefined)
+            if (arrayOfValues === undefined) {
                 fireSet.remove();
                 return set().slice(0);
-            else {
+            } else {
                 return set.remove(function(value) { 
-                    ko.utils.arrayIndexOf(arrayOfValues, value) >= 0; 
+                    return ko.utils.arrayIndexOf(arrayOfValues, value) >= 0; 
                 });
             }
         };
@@ -271,9 +271,7 @@
                 //We need to get howMany from the total
                 var end = index < 0 ? items.length - index + howMany : index + howMany
                 removedItems = items.slice(index, end);
-                removedItems.forEach(function(item) {
-                    removeFireSetItem(fireSet, item[idProperty]);
-                });
+                set.removeAll(removedItems);
             }
 
             if (itemsToAdd) {
