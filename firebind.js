@@ -201,7 +201,8 @@
         };
 
         set.remove = function(valueOrPredicate) {
-            var removedValues = [];
+            var items = set.peek(),
+                removedValues = [];
             var predicate = typeof valueOrPredicate == "function" && !ko.isObservable(valueOrPredicate)
                             ? valueOrPredicate
                             : function (value) { return value === valueOrPredicate; };
