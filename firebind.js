@@ -10,84 +10,277 @@
         return setItem;
     };
 
-    var removeSetItem = function(fireSet, childId) {
+    var removeFireSetItem = function(fireSet, childId) {
         var item = fireSet.child(childId);
         if (item != null)
             item.remove();
+        return item;
     };
 
+    var addItemsToSetBeforeIndex = function(fireSet, items, index, itemsToAdd) {
+        if (items.length) { //Items already present
+            var sliceItem = items[index],
+                slicePriority = priorityMap[ko.unwrap(sliceItem[idProperty])],
+                newPriority = slicePriority / 2;
+
+            itemsToAdd.forEach(function(item) {
+                fireSet.push().setWithPriority(item, newPriority);
+                 //Get priority inbetween previous and original priority
+                newPriority = (newPriority + slicePriority) / 2;
+            });            
+        } else { //No items present, just add everything
+            var newPriority = 0;
+            itemsToAdd.forEach(function(item) {
+                newPriority++;
+                fireSet.push().setWithPriority(item, newPriority);
+            });
+        }
+    };
+
+    var isNumber = function(n) {
+      return !isNaN(parseFloat(n)) && isFinite(n);
+    };
+
+    /*
+        A fire set is an observableArray of a firebase location
+        If you do not specify a config.id property to serve as the
+        'name' of the firebase child, 'id' will be used by default.
+
+        All sets use firebase priority, to ensure consistent behavior
+        By default, an int priority will be generated for each new item
+        In the set. All methods that would modify the order
+        will take this priority into account. Optionally, you can
+        specify a property of the children to use as the prioirity
+        by setting config.orderBy.
+    */
     ko.fireSet = function(fireSet, Constructor, config) {
         var set = ko.observableArray(),
             config = config || {},
-            query = config.query,
-            idProperty = config.id || 'id';
-        
-        if (query) {
-            if (query.startAt)
-                fireSet = fireSet.startAt(query.startAt);
-            if (query.endAt)
-                fireSet = fireSet.endAt(query.endAt);
-            if (query.limit)
-                fireSet = fireSet.limit(query.limit);
-        };
-        
+            idProperty = config.id || 'id',
+            priorityProperty = config.orderBy, //undefined is fine
+            priorityMap = {};
+
+        //------------------------------------------
+        //-------------Firebase Events--------------
+        //------------------------------------------
+
         //Keep a reference to the original set methods
         var setPush = set.push,
-            setRemove = set.remove;
+            setRemove = set.remove,
+            setSplice = set.splice,
+            setUnshift = set.unshift;
         
-        fireSet.on('child_added', function(item) {
+        fireSet.on('child_added', function(item, prevItemId) {
             var id = item.name(),
-                data = item.val();
-            setPush.call(set, new Constructor(id, data, fireSet.child(id)));
+                data = item.val(),
+                child = new Constructor(id, data, fireSet.child(id));
+
+            //Set the priorty of the item in the map
+            priorityMap[id] = item.getPriority();
+
+            //If no previous child is given, just add it to the end
+            if (prevItemId === undefined)
+                setPush.call(set, child);
+            //If previous child is given, but null, ordering is on
+            //but this item is the first, so add it to the beginning
+            else if (prevItemId === null)
+                setUnshift.call(set, child);
+            //Otherwise, find the correct index to put it in
+            else {
+                var items = set(),
+                    prevItem = getItemById(items, idProperty, prevItemId),
+                    prevItemIndex = items.indexOf(prevItem);;
+                setSplice.call(set, prevItemIndex + 1, 0, child);
+            }
+        });
+
+        fireSet.on('child_moved', function(item, prevItemId) {
+            var id = item.name()
+                items = set.peek()
+                setItem = getItemById(items, idProperty, id),
+                oldIndex = items.indexOf(setItem),
+                newIndex = 0;
+
+            //Only try to find the new index if a previous child was given
+            //Otherwise the item has been moved to the front
+            if (prevItemId !== null) {
+                var prevSetItem = getItemById(items, idProperty, prevItemId),
+                    newIndex = items.indexOf(prevSetItem);
+            }
+
+            //Set the priorty of the item in the map
+            priorityMap[id] = item.getPriority();
+
+            set.splice(newIndex, 0, set.splice(oldIndex, 1)[0]);
         });
         
         fireSet.on('child_removed', function(item) {
             var id = item.name(),
                 items = set(),
-                setItem = getItemById(items, idProperty, id);        
+                setItem = getItemById(items, idProperty, id);
+
+            //Remove the priority from the map
+            delete priorityMap[id];
+
             setRemove.call(set, setItem);
         });
-        
-        //Remove unsupported methods
-        ['reverse', 'sort', 'splice', 'unshift'].forEach(function(method) {
-            set[method] = function() {
-                throw new Error("This method is not supported on FireSets. It will be implemented when ordered sets are finished.");
-            };
-        });
-        
-        //Replace the set methods with methods that call firebase
-        set.pop = function(){
-            var items = set(),
-                setItem = items[items.length - 1];
-            removeSetItem(fireSet, item[idProperty]);
-        };    
 
-        set.push = function(item) {
-            //For some reason setting this method directly: set.push = fireSet.push
-            //Causes an error inside firebase.
-            //May be caused by other arguments from click event bindings
-            fireSet.push().setWithPriority(item, 20);
+        //----------------------------------------
+        //---------------Set Methods--------------
+        //----------------------------------------
+
+        /*
+            We don't modify the Set() here, we allow the firebase events to
+            do that so that it only happens in a single place. Doing so
+            ensure that security is always enforced, and that ordering is
+            handled properly. We replace all the array modifying methods
+            with ones that just call the proper firebase methods.
+        */
+
+        set.push = function() {
+            var args = Array.prototype.slice.call(arguments),
+                items = set.peek();
+
+            //Determine if we are sorting by default, or based on a property
+            //If we are, we don't need to bother trying to add to the beginning or end
+            if (priorityProperty) {
+                args.forEach(function(item) {
+                    fireSet.push().setWithPriority(item, ko.unwrap(item[priorityProperty]));
+                });
+            } else {
+                var newPriority = 0;
+
+                //if there are any items
+                if (items.length) {
+                    var lastSetItem = items[items.length - 1];
+                    newPriority = priorityMap[ko.unwrap(lastSetItem[idProperty])];
+                    //Round up to normalize numbers that may have become very precise floats
+                    //Check numeracy to ensure sanity
+                    newPriority = isNumber(newPriority) ? Math.ceil(newPriority) : 0;
+                }
+                
+                args.forEach(function(item) {
+                    newPriority++;
+                    fireSet.push().setWithPriority(item, newPriority);
+                });
+            }
+
+            //Just assume everything will add correctly
+            return items.length + arguments.length;
         };
 
+        set.pop = function(){
+            var items = set.peek(),
+                setItem = items[items.length - 1];
+            removeFireSetItem(fireSet, ko.unwrap(item[idProperty]));
+            return setItem;
+        };    
+
         set.shift = function() {
-            var setItem = set()[0];
-            removeSetItem(fireSet, item[idProperty]);
+            var setItem = set.peek()[0];
+            removeFireSetItem(fireSet, ko.unwrap(item[idProperty]));
+            return setItem;
         };
 
         set.unshift = function() {
-            //GET THE PRIORITY FROM THE REFERENCE!!!
-            //var items = set(),
-            //    firstItem
+            var items = set.peek(),
+                itemsToAdd = Array.prototype.slice.call(arguments);
+
+            //Determine if we are sorting by default, or based on a property
+            //If we are, we don't need to bother trying to add to the beginning or end
+            if (priorityProperty) {
+                itemsToAdd.forEach(function(item) {
+                    fireSet.push().setWithPriority(item, ko.unwrap(item[priorityProperty]));
+                });            
+            } else {
+                addItemsToSetBeforeIndex(fireSet, items, 0, itemsToAdd);
+            }
+
+            //Just assume everything will add correctly
+            return items.length + arguments.length;
         };
 
-        set.remove = function(item) {
-            var items = set(),
-                setItem = getItemById(items, idProperty, item[idProperty])
-            removeSetItem(fireSet, item[idProperty]);
+        set.remove = function(valueOrPredicate) {
+            var removedValues = [];
+            var predicate = typeof valueOrPredicate == "function" && !ko.isObservable(valueOrPredicate)
+                            ? valueOrPredicate
+                            : function (value) { return value === valueOrPredicate; };
+
+            items.forEach(function(item) {
+                if (predicate(item)) {
+                    removeFireSetItem(fireSet, item[idProperty]);
+                    removedValues.push(item);
+                }
+            });
+            return removedValues;
         };
 
-        set.removeAll = function() {
-            fireSet.remove();
+        set.removeAll = function(arrayOfValues) {
+            //If you passed nothing, we should remove everything
+            if (arrayOfValues === undefined)
+                fireSet.remove();
+                return set().slice(0);
+            else {
+                return set.remove(function(value) { 
+                    ko.utils.arrayIndexOf(arrayOfValues, value) >= 0; 
+                });
+            }
+        };
+        
+        set.sort = function(sorter) {
+            //Calling this method when priorityProperty doesn't really do much, so just return
+            if (priorityProperty && !sorter)
+                return set.peek();
+
+            sorter = sorter && typeof sorter === 'function' || function(left, right) {
+                if (sorter)
+                    return ko.unwrap(left[sorter]) > ko.unwrap(right[sorter]) ? 1 : -1;
+                else
+                    return priorityMap[ko.unwrap(left[idProperty])] > priorityMap[ko.unwrap(right[idProperty])] ? 1 : -1;                
+            };
+
+            var items = set.peek(),
+                newPriority = Math.floor(priorityMap[ko.unwrap(items[0][idProperty])]),
+                sortItems = items.slice(0).sort(sorter);
+            
+            //
+            sortItems.forEach(function(item) {
+                fireSet.child(ko.unwrap(item[idProperty])).setPriority(newPriority);
+                newPriority++;
+            });
+        };
+
+        set.reverse = function() {
+            if (priorityProperty)
+                throw new Error("You cannot reverse a fireSet that is sorted on a property.");
+            set.sort(function(left, right) {
+                return ko.unwrap(left[sorter]) > ko.unwrap(right[sorter]) ? -1 : 1;
+            });
+        };
+
+        set.splice = function(index, howMany) {
+            var items = set.peek(),
+                itemsToAdd = Array.prototype.slice.call(arguments).slice(2), //Only get adds
+                removedItems = [];
+
+            if (itemsToAdd && priorityProperty)
+                throw new Error("You cannot splice items into a fireSet that is sorted on a property");
+
+            if (howMany) {
+                //If index is negative, its an offset
+                //We need to get howMany from the total
+                var end = index < 0 ? items.length - index + howMany : index + howMany
+                removedItems = items.slice(index, end);
+                removedItems.forEach(function(item) {
+                    removeFireSetItem(fireSet, item[idProperty]);
+                });
+            }
+
+            if (itemsToAdd) {
+                 addItemsToSetBeforeIndex(fireSet, items, index, itemsToAdd);
+            }
+
+            return removedItems;
         };
         
         //Slice is fine, doesn't need to change
