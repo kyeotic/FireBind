@@ -88,17 +88,19 @@
                 oldIndex = items.indexOf(setItem),
                 newIndex = 0;
 
+            //Set the priorty of the item in the map
+            priorityMap[id] = item.getPriority();
+
+            var oldItem = setSplice.call(set, oldIndex, 1)[0];
+
             //Only try to find the new index if a previous child was given
             //Otherwise the item has been moved to the front
             if (prevItemId !== null) {
                 var prevSetItem = getItemById(items, idProperty, prevItemId),
-                    newIndex = items.indexOf(prevSetItem);
+                    newIndex = items.indexOf(prevSetItem) + 1;
             }
 
-            //Set the priorty of the item in the map
-            priorityMap[id] = item.getPriority();
-
-            setSplice.call(set, newIndex, 0, setSplice.call(set, oldIndex, 1)[0]);
+            setSplice.call(set, newIndex, 0, oldItem);
         });
         
         fireSet.on('child_removed', function(item) {
@@ -265,17 +267,33 @@
         set.move = function(oldIndex, newIndex) {
             var items = set.peek(),
                 item = items[oldIndex],
-                fireChild = fireSet.child(ko.unwrap(item[idProperty]));
+                l = items.length,
+                fireChild = fireSet.child(ko.unwrap(item[idProperty])),
+                up = oldIndex > newIndex;
+
+            //Obviously, you can't move things with less than two items
+            if (l < 2)
+                return;
+
+            //Negatives are offsets
+            //Use mod to allow for negatives larger than the array to wrap around
+            //The extra mod is to handle the case where % index == l, since that is
+            //Actually outside the array bound, when it should be 0
+            if (newIndex < 0)
+                newIndex = ((newIndex) % l + l) % l;
+            //Values larger than the array will wrap around to the beginning
+            else if (newIndex >= l)
+                newIndex = 0;
 
             if (newIndex === 0) {
                 var firstPriority = priorityMap[ko.unwrap(items[0][idProperty])];
                 fireChild.setPriority(Math.floor(firstPriority - 1));
-            } else if (newIndex === (items.length - 1)) {
+            } else if (newIndex === (l - 1)) {
                 var lastPriority = priorityMap[ko.unwrap(items[newIndex][idProperty])];
                 fireChild.setPriority(Math.ceil(lastPriority + 1));
             } else {
-                var left = items[newIndex - 1],
-                    right = items[newIndex],
+                var left = items[up ? newIndex - 1 : newIndex],
+                    right = items[up ? newIndex : newIndex + 1],
                     leftPriority = priorityMap[ko.unwrap(left[idProperty])];
                     rightPriority = priorityMap[ko.unwrap(right[idProperty])],
                     newPriority = (leftPriority + rightPriority) / 2;
@@ -284,7 +302,6 @@
         };
 
         set.splice = function(index, howMany) {
-
             throw new Error("Splice is not currently implemented. You can use move or remove.");
             /*
             var items = set.peek(),
@@ -312,7 +329,7 @@
         
         //Slice is fine, doesn't need to change
 
-        //return the (modified) observable array
+        //return the modified observable array
         return set;
     };
 
