@@ -1,4 +1,11 @@
 (function(ko) {
+
+
+    var convertToSimpleJS = function(model) {
+        var result= JSON.parse(ko.toJSON(model));
+        return result;
+    };
+
     var getItemById = function(items, idProperty, id) {
         var setItem;
         for (var i = 0; i < items.length; i++) {
@@ -15,26 +22,6 @@
         if (item != null)
             item.remove();
         return item;
-    };
-
-    var addItemsToSetBeforeIndex = function(fireSet, items, index, itemsToAdd) {
-        if (items.length) { //Items already present
-            var sliceItem = items[index],
-                slicePriority = priorityMap[ko.unwrap(sliceItem[idProperty])],
-                newPriority = slicePriority / 2;
-
-            itemsToAdd.forEach(function(item) {
-                fireSet.push().setWithPriority(item, newPriority);
-                 //Get priority inbetween previous and original priority
-                newPriority = (newPriority + slicePriority) / 2;
-            });            
-        } else { //No items present, just add everything
-            var newPriority = 0;
-            itemsToAdd.forEach(function(item) {
-                newPriority++;
-                fireSet.push().setWithPriority(item, newPriority);
-            });
-        }
     };
 
     var isNumber = function(n) {
@@ -111,7 +98,7 @@
             //Set the priorty of the item in the map
             priorityMap[id] = item.getPriority();
 
-            set.splice(newIndex, 0, set.splice(oldIndex, 1)[0]);
+            setSplice.call(set, newIndex, 0, setSplice.call(set, oldIndex, 1)[0]);
         });
         
         fireSet.on('child_removed', function(item) {
@@ -145,7 +132,7 @@
             //If we are, we don't need to bother trying to add to the beginning or end
             if (priorityProperty) {
                 args.forEach(function(item) {
-                    fireSet.push().setWithPriority(item, ko.unwrap(item[priorityProperty]));
+                    fireSet.push().setWithPriority(convertToSimpleJS(item), ko.unwrap(item[priorityProperty]));
                 });
             } else {
                 var newPriority = 0;
@@ -161,7 +148,7 @@
                 
                 args.forEach(function(item) {
                     newPriority++;
-                    fireSet.push().setWithPriority(item, newPriority);
+                    fireSet.push().setWithPriority(convertToSimpleJS(item), newPriority);
                 });
             }
 
@@ -171,15 +158,15 @@
 
         set.pop = function(){
             var items = set.peek(),
-                setItem = items[items.length - 1];
+                item = items[items.length - 1];
             removeFireSetItem(fireSet, ko.unwrap(item[idProperty]));
-            return setItem;
+            return item;
         };    
 
         set.shift = function() {
-            var setItem = set.peek()[0];
+            var item = set.peek()[0];
             removeFireSetItem(fireSet, ko.unwrap(item[idProperty]));
-            return setItem;
+            return item;
         };
 
         set.unshift = function() {
@@ -190,10 +177,26 @@
             //If we are, we don't need to bother trying to add to the beginning or end
             if (priorityProperty) {
                 itemsToAdd.forEach(function(item) {
-                    fireSet.push().setWithPriority(item, ko.unwrap(item[priorityProperty]));
+                    fireSet.push().setWithPriority(convertToSimpleJS(item), ko.unwrap(item[priorityProperty]));
                 });            
             } else {
-                addItemsToSetBeforeIndex(fireSet, items, 0, itemsToAdd);
+                if (items.length) { //Items already present
+                    var sliceItem = items[0],
+                        slicePriority = priorityMap[ko.unwrap(sliceItem[idProperty])],
+                        newPriority = slicePriority / 2;
+
+                    itemsToAdd.forEach(function(item) {
+                        fireSet.push().setWithPriority(convertToSimpleJS(item), newPriority);
+                         //Get priority inbetween previous and original priority
+                        newPriority = (newPriority + slicePriority) / 2;
+                    });            
+                } else { //No items present, just add everything
+                    var newPriority = 0;
+                    itemsToAdd.forEach(function(item) {
+                        newPriority++;
+                        fireSet.push().setWithPriority(convertToSimpleJS(item), newPriority);
+                    });
+                }
             }
 
             //Just assume everything will add correctly
@@ -259,7 +262,31 @@
             });
         };
 
+        set.move = function(oldIndex, newIndex) {
+            var items = set.peek(),
+                item = items[oldIndex],
+                fireChild = fireSet.child(ko.unwrap(item[idProperty]));
+
+            if (newIndex === 0) {
+                var firstPriority = priorityMap[ko.unwrap(items[0][idProperty])];
+                fireChild.setPriority(Math.floor(firstPriority - 1));
+            } else if (newIndex === (items.length - 1)) {
+                var lastPriority = priorityMap[ko.unwrap(items[newIndex][idProperty])];
+                fireChild.setPriority(Math.ceil(lastPriority + 1));
+            } else {
+                var left = items[newIndex - 1],
+                    right = items[newIndex],
+                    leftPriority = priorityMap[ko.unwrap(left[idProperty])];
+                    rightPriority = priorityMap[ko.unwrap(right[idProperty])],
+                    newPriority = (leftPriority + rightPriority) / 2;
+                fireChild.setPriority(newPriority);
+            }
+        };
+
         set.splice = function(index, howMany) {
+
+            throw new Error("Splice is not currently implemented. You can use move or remove.");
+            /*
             var items = set.peek(),
                 itemsToAdd = Array.prototype.slice.call(arguments).slice(2), //Only get adds
                 removedItems = [];
@@ -275,11 +302,12 @@
                 set.removeAll(removedItems);
             }
 
-            if (itemsToAdd) {
-                 addItemsToSetBeforeIndex(fireSet, items, index, itemsToAdd);
+            if (itemsToAdd.length > 0) {
+                 addItemsToSetBeforeIndex(fireSet, priorityMap, idProperty, items, index, itemsToAdd);
             }
 
             return removedItems;
+            */
         };
         
         //Slice is fine, doesn't need to change
