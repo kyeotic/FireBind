@@ -1,4 +1,4 @@
-FireBind
+FireBind v0.5.1
 ========
 
 Knockout bindings for Firebase
