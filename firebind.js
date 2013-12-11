@@ -1,6 +1,5 @@
+//FireBind v0.5.1, by Tyrsius
 (function(ko) {
-
-
     var convertToSimpleJS = function(model) {
         var result= JSON.parse(ko.toJSON(model));
         return result;
