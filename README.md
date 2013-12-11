@@ -43,7 +43,7 @@ Here is a common example:
 
 This constructor can be used by a Fireset.
 
-You can see both of these in use in this fiddle: http://jsfiddle.net/tyrsius/xdXD2/4/
+You can see both of these in use in this fiddle: http://jsfiddle.net/tyrsius/eaeY5/
 
 For quick, easy use, add firebind with this URL: https://rawgithub.com/tyrsius/FireBind/master/firebind.js
 
