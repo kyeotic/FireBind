@@ -269,6 +269,9 @@
                 l = items.length,
                 fireChild = fireSet.child(ko.unwrap(item[idProperty])),
                 up = oldIndex > newIndex;
+                
+            if (priorityProperty)
+                throw new Error("You cannot move a fireSet that is sorted on a property.");
 
             //Obviously, you can't move things with less than two items
             if (l < 2)
